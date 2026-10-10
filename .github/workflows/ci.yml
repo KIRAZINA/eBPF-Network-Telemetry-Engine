@@ -138,17 +138,25 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             llvm linux-tools-common linux-tools-generic
+      - name: Locate downloaded artifacts (layout-agnostic)
+        run: |
+          BPF_OBJ=$(find dist -name telemetry.bpf.o -print -quit)
+          if [ -z "$BPF_OBJ" ]; then
+            echo "telemetry.bpf.o missing; dist tree:"; find dist -ls; exit 1
+          fi
+          echo "BPF_OBJ=$BPF_OBJ" >> "$GITHUB_ENV"
+          echo "Using BPF object: $BPF_OBJ"
       - name: Static bytecode checks (ELF type, sections)
         run: |
-          file dist/telemetry.bpf.o
-          file dist/telemetry.bpf.o | grep -q 'eBPF'
-          llvm-readelf -S dist/telemetry.bpf.o | grep -Eq 'license|\.maps'
-          llvm-readelf -S dist/telemetry.bpf.o | grep -Eq 'xdp|tracepoint'
+          file "$BPF_OBJ"
+          file "$BPF_OBJ" | grep -q 'eBPF'
+          llvm-readelf -S "$BPF_OBJ" | grep -Eq 'license|\.maps'
+          llvm-readelf -S "$BPF_OBJ" | grep -Eq 'xdp|tracepoint'
       - name: Kernel verifier gate (real bpftool prog load)
         run: |
           uname -r
           ls -l /sys/kernel/btf/vmlinux
-          sudo bpftool prog load dist/telemetry.bpf.o /sys/fs/bpf/ci_verify autoattach
+          sudo bpftool prog load "$BPF_OBJ" /sys/fs/bpf/ci_verify autoattach
           sudo bpftool prog show pinned /sys/fs/bpf/ci_verify
           sudo rm /sys/fs/bpf/ci_verify
           echo "VERIFIER GATE PASSED"
@@ -179,9 +187,14 @@ jobs:
           echo "Release version: $VER"
       - name: Assemble release tarball
         run: |
+          DAEMON_BIN=$(find dist -name ebpf-telemetry-daemon -print -quit)
+          BPF_OBJ=$(find dist -name telemetry.bpf.o -print -quit)
+          if [ -z "$DAEMON_BIN" ] || [ -z "$BPF_OBJ" ]; then
+            echo "artifacts missing; dist tree:"; find dist -ls; exit 1
+          fi
           mkdir -p pkg/usr/local/bin pkg/usr/local/share/ebpf-telemetry/bpf
-          cp dist/ebpf-telemetry-daemon pkg/usr/local/bin/
-          cp dist/telemetry.bpf.o pkg/usr/local/share/ebpf-telemetry/bpf/
+          cp "$DAEMON_BIN" pkg/usr/local/bin/
+          cp "$BPF_OBJ" pkg/usr/local/share/ebpf-telemetry/bpf/
           cp contrib/ebpf-telemetry.service pkg/ 2>/dev/null || true
           cp Deployment-Runbook.md pkg/ 2>/dev/null || true
           tar -C pkg -czf "ebpf-telemetry-${{ steps.version.outputs.version }}.tar.gz" .
