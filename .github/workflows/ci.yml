@@ -44,7 +44,7 @@ jobs:
           # NOTE: `bpftool` is a virtual package on noble; the real providers
           # are linux-tools-common / linux-tools-generic.
           apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git curl \
+            build-essential cmake ninja-build pkg-config git curl ca-certificates \
             clang llvm libbpf-dev libelf-dev zlib1g-dev \
             linux-tools-common linux-tools-generic linux-headers-generic
 
@@ -89,7 +89,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git \
+            build-essential cmake ninja-build pkg-config git ca-certificates \
             clang llvm libbpf-dev libelf-dev zlib1g-dev \
             linux-tools-common linux-tools-generic linux-headers-generic
       - name: Configure (Debug + sanitizers)
@@ -111,7 +111,7 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build pkg-config git \
+            build-essential cmake ninja-build pkg-config git ca-certificates \
             clang clang-tidy llvm libbpf-dev libelf-dev zlib1g-dev \
             linux-headers-generic
       - name: Configure (compile_commands.json for tidy)
