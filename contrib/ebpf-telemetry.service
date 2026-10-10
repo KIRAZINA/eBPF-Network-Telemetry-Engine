@@ -1,0 +1,51 @@
+# ebpf-telemetry.service — production systemd unit for the
+# eBPF Network Telemetry & Security Engine.
+#
+# Install:
+#   sudo cp contrib/ebpf-telemetry.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now ebpf-telemetry.service
+#
+# Configure the monitored interface by overriding IFINDEX (interface index
+# from `ip -o link show`), e.g.:
+#   sudo systemctl edit ebpf-telemetry.service   # [Service] Environment=IFINDEX=3
+# or edit the Environment= line below directly (default: 2 = eth0 on most hosts).
+
+[Unit]
+Description=eBPF Network Telemetry & Security Engine
+Documentation=file:///usr/local/share/doc/ebpf-telemetry/Deployment-Runbook.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ebpf-telemetry
+Group=ebpf-telemetry
+ExecStart=/usr/local/bin/ebpf-telemetry-daemon /usr/local/share/ebpf-telemetry/bpf/telemetry.bpf.o ${IFINDEX} 9090
+Environment=IFINDEX=2
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+# Privileges: BPF map/prog management + XDP attach + tracepoints.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_BPF
+AmbientCapabilities=CAP_NET_ADMIN CAP_SYS_ADMIN CAP_BPF
+NoNewPrivileges=false
+
+# Filesystem sandboxing.
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+# Logging to journald.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ebpf-telemetry
+
+[Install]
+WantedBy=multi-user.target

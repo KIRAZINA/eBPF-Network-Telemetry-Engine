@@ -1,0 +1,93 @@
+# docker-compose.yml — observability stack + eBPF telemetry daemon.
+#
+# Usage:
+#   docker compose config          # offline validation gate (no daemon needed)
+#   IFINDEX=2 docker compose up -d --build
+#   docker compose ps
+#   curl -s http://localhost:9091/-/healthy   # Prometheus
+#   curl -s http://localhost:9090/healthz     # daemon (host network)
+#   open http://localhost:3000                # Grafana (admin / $GRAFANA_ADMIN_PASSWORD)
+#
+# Networking model: the daemon runs with host networking (required for XDP on
+# host NICs and BPF map access), so Prometheus scrapes it via
+# host.docker.internal:9090 (built-in on Docker Desktop; mapped to the host
+# gateway below for Linux). Prometheus itself listens on 9091 externally to
+# avoid clashing with the daemon's host-network :9090.
+
+name: ebpf-telemetry
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.2.1
+    container_name: ebpf-prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./deploy/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./deploy/prometheus/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - '9091:9090'
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    healthcheck:
+      test: ['CMD', 'wget', '--spider', '-q', 'http://localhost:9090/-/healthy']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.5.2
+    container_name: ebpf-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    ports:
+      - '3000:3000'
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    restart: unless-stopped
+
+  ebpf-telemetry:
+    build:
+      context: .
+      dockerfile: deploy/daemon/Dockerfile
+    container_name: ebpf-telemetry-daemon
+    network_mode: host
+    cap_add:
+      - SYS_ADMIN
+      - NET_ADMIN
+      - BPF
+      - SYS_RESOURCE
+    volumes:
+      - /sys/kernel/debug:/sys/kernel/debug
+      - /sys/fs/bpf:/sys/fs/bpf
+    # IFINDEX is compose-time interpolation (host env or .env file), NOT a
+    # container env var — the daemon takes it as positional argv[2] below.
+    command:
+      - /usr/local/share/ebpf-telemetry/bpf/telemetry.bpf.o
+      - ${IFINDEX:-2}
+      - '9090'
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -f http://localhost:9090/healthz || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+
+volumes:
+  prometheus-data: {}
+  grafana-data: {}

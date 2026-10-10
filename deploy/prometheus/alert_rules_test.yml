@@ -1,0 +1,102 @@
+# alert_rules_test.yml — promtool unit tests for alert_rules.yml.
+#
+# Gate:  promtool test rules alert_rules_test.yml   (run from deploy/prometheus/)
+# Each case feeds synthetic series at 5s intervals, then asserts which alerts
+# fire (or that none fire) at the evaluation timestamp.
+
+rule_files:
+  - alert_rules.yml
+
+evaluation_interval: 5s
+
+tests:
+  # --- SynFloodSpike fires on a sustained 10/s SYN-flood verdict rate ---
+  # (+50 per 5s sample = 10/s, well above the >5 threshold for the 1m for-window)
+  - interval: 5s
+    input_series:
+      - series: 'telemetry_anomalies_detected_total{type="syn_flood"}'
+        values: 0+50x24
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: SynFloodSpike
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+            exp_annotations:
+              summary: "SYN-flood anomaly spike"
+              description: "syn_flood detector verdicts above 5/s over the last minute."
+
+  # --- SynFloodSpike stays silent on a trickle below threshold ---
+  - interval: 5s
+    input_series:
+      - series: 'telemetry_anomalies_detected_total{type="syn_flood"}'
+        values: 0+0x24
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: SynFloodSpike
+        exp_alerts: []
+
+  # --- PortScanDetected fires on any port-scan verdict rate ---
+  - interval: 5s
+    input_series:
+      - series: 'telemetry_anomalies_detected_total{type="port_scan"}'
+        values: 0+1x24
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: PortScanDetected
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Port-scan anomaly detected"
+              description: "port_scan detector verdicts observed over the last 5 minutes."
+
+  # --- RingBufferErrors fires when errors accumulate, silent at zero ---
+  - interval: 5s
+    input_series:
+      - series: telemetry_ring_errors_total
+        values: 0+1x24
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: RingBufferErrors
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+            exp_annotations:
+              summary: "Ring-buffer errors accumulating"
+              description: "Ring poll errors observed over the last 5 minutes; consumer may be losing events."
+
+  - interval: 5s
+    input_series:
+      - series: telemetry_ring_errors_total
+        values: 0+0x24
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: RingBufferErrors
+        exp_alerts: []
+
+  # --- DaemonDown fires when scrapes fail, silent when up ---
+  - interval: 5s
+    input_series:
+      - series: 'up{job="ebpf-telemetry"}'
+        values: 0+0x24
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: DaemonDown
+        exp_alerts:
+          - exp_labels:
+              # `up == 0` preserves source labels; job must be asserted too.
+              job: ebpf-telemetry
+              severity: critical
+            exp_annotations:
+              summary: "eBPF telemetry daemon unscrapeable"
+              description: "No successful Prometheus scrape of the daemon for 1 minute."
+
+  - interval: 5s
+    input_series:
+      - series: 'up{job="ebpf-telemetry"}'
+        values: 1+0x24
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: DaemonDown
+        exp_alerts: []

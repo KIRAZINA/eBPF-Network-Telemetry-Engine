@@ -1,0 +1,13 @@
+# Dashboard provider: loads deploy/grafana/dashboards/*.json at startup.
+# Mounted to /etc/grafana/provisioning/dashboards (see docker-compose.yml).
+apiVersion: 1
+
+providers:
+  - name: ebpf-telemetry
+    folder: eBPF
+    type: file
+    disableDeletion: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: false
+    options:
+      path: /etc/grafana/dashboards

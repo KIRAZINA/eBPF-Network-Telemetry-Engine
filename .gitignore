@@ -1,0 +1,36 @@
+# Build outputs
+build/
+cmake-build-*/
+_deps/
+*.bpf.o
+include/vmlinux.h
+
+# Compiled artifacts
+bin/
+*.o
+*.a
+*.so
+*.out
+
+# IDE / tooling
+.vscode/
+.idea/
+compile_commands.json
+.cache/
+.clangd/
+.pytest_cache/
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# Local env / secrets (e.g. GRAFANA_ADMIN_PASSWORD for compose)
+.env
+
+# Logs and release tarballs
+*.log
+*.tar.gz
+
+# OS noise
+.DS_Store
+Thumbs.db

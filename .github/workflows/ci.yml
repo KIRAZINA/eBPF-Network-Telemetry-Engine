@@ -1,0 +1,244 @@
+name: CI
+
+# Pipeline: configure -> build (-Werror) -> full CTest (26 tests) ->
+# stress/perf gates -> sanitizers -> clang-tidy -> BPF verifier gate ->
+# versioned packaging -> (tags only) release + container publish.
+#
+# Runner requirements: Linux x86_64, BTF-enabled kernel 5.8+ (the bpf-verify
+# job performs a real `bpftool prog load`, which runs the kernel verifier).
+# GitHub-hosted ubuntu-24.04 satisfies this.
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  schedule:
+    - cron: '0 6 * * 1' # weekly toolchain-drift check (Mondays 06:00 UTC)
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DEBIAN_FRONTEND: noninteractive
+
+jobs:
+  build-and-test:
+    name: Build + full CTest suite
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: ubuntu:24.04
+    steps:
+      - name: Check out sources
+        uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          apt-get update
+          # NOTE: `bpftool` is a virtual package on noble; the real providers
+          # are linux-tools-common / linux-tools-generic.
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git curl \
+            clang llvm libbpf-dev libelf-dev zlib1g-dev \
+            linux-tools-common linux-tools-generic linux-headers-generic
+
+      - name: CMake configure (Release, strict flags)
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Parallel compile
+        run: cmake --build build -j"$(nproc)"
+
+      - name: Full CTest suite (26 tests)
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Stress + perf gates ([stress],[perf] tags)
+        run: ./build/bin/telemetry_tests "[stress],[perf]" -s
+
+      - name: Upload LastTest.log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-log
+          path: build/Testing/Temporary/LastTest.log
+          retention-days: 7
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ebpf-telemetry-build
+          path: |
+            build/bin/ebpf-telemetry-daemon
+            build/src/kernel/telemetry.bpf.o
+          retention-days: 7
+
+  sanitizers:
+    name: ASan + UBSan build and test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git \
+            clang llvm libbpf-dev libelf-dev zlib1g-dev \
+            linux-tools-common linux-tools-generic linux-headers-generic
+      - name: Configure (Debug + sanitizers)
+        run: cmake -B build-asan -G Ninja -DCMAKE_BUILD_TYPE=Debug -DENABLE_ASAN=ON
+      - name: Build
+        run: cmake --build build-asan -j"$(nproc)"
+      - name: CTest under ASan/UBSan (zero findings gate)
+        run: ctest --test-dir build-asan --output-on-failure
+
+  clang-tidy:
+    name: Clang-Tidy static analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    container:
+      image: ubuntu:24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install toolchain + clang-tidy
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git \
+            clang clang-tidy llvm libbpf-dev libelf-dev zlib1g-dev \
+            linux-headers-generic
+      - name: Configure (compile_commands.json for tidy)
+        run: cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+      - name: Run clang-tidy (warnings as errors)
+        run: |
+          find src/daemon -name '*.cpp' -print0 \
+            | xargs -0 -P"$(nproc)" -I{} \
+              clang-tidy {} -p build --warnings-as-errors='*'
+
+  bpf-verify:
+    name: BPF bytecode + kernel verifier gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [build-and-test]
+    steps:
+      - name: Download BPF object
+        uses: actions/download-artifact@v4
+        with:
+          name: ebpf-telemetry-build
+          path: dist
+      - name: Install bpftool + LLVM tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            llvm linux-tools-common linux-tools-generic
+      - name: Static bytecode checks (ELF type, sections)
+        run: |
+          file dist/telemetry.bpf.o
+          file dist/telemetry.bpf.o | grep -q 'eBPF'
+          llvm-readelf -S dist/telemetry.bpf.o | grep -Eq 'license|\.maps'
+          llvm-readelf -S dist/telemetry.bpf.o | grep -Eq 'xdp|tracepoint'
+      - name: Kernel verifier gate (real bpftool prog load)
+        run: |
+          uname -r
+          ls -l /sys/kernel/btf/vmlinux
+          sudo bpftool prog load dist/telemetry.bpf.o /sys/fs/bpf/ci_verify autoattach
+          sudo bpftool prog show pinned /sys/fs/bpf/ci_verify
+          sudo rm /sys/fs/bpf/ci_verify
+          echo "VERIFIER GATE PASSED"
+
+  package:
+    name: Version + package artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    needs: [build-and-test, sanitizers, clang-tidy, bpf-verify]
+    permissions:
+      contents: write # required only for GitHub Release on tags
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: ebpf-telemetry-build
+          path: dist
+      - name: Resolve version (git describe, fallback 0.1.0+sha)
+        id: version
+        run: |
+          VER=$(git describe --tags --always --dirty 2>/dev/null || true)
+          case "$VER" in v*) VER="${VER#v}";; esac
+          [ -z "$VER" ] && VER="0.1.0+${GITHUB_SHA::12}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "Release version: $VER"
+      - name: Assemble release tarball
+        run: |
+          mkdir -p pkg/usr/local/bin pkg/usr/local/share/ebpf-telemetry/bpf
+          cp dist/ebpf-telemetry-daemon pkg/usr/local/bin/
+          cp dist/telemetry.bpf.o pkg/usr/local/share/ebpf-telemetry/bpf/
+          cp contrib/ebpf-telemetry.service pkg/ 2>/dev/null || true
+          cp Deployment-Runbook.md pkg/ 2>/dev/null || true
+          tar -C pkg -czf "ebpf-telemetry-${{ steps.version.outputs.version }}.tar.gz" .
+          sha256sum "ebpf-telemetry-${{ steps.version.outputs.version }}.tar.gz" > checksums.txt
+          ls -l
+      - name: Upload package artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ebpf-telemetry-release
+          path: |
+            ebpf-telemetry-*.tar.gz
+            checksums.txt
+          retention-days: 30
+      - name: Publish GitHub Release (tags v* only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ebpf-telemetry-*.tar.gz
+            checksums.txt
+          generate_release_notes: true
+
+  docker:
+    name: Container image build (+ push on tags)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    needs: [build-and-test]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image metadata (immutable version tags)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,prefix=,suffix=,format=short
+      - name: Build (push only on tags v*)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/daemon/Dockerfile
+          push: ${{ startsWith(github.ref, 'refs/tags/v') }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

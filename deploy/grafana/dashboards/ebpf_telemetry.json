@@ -1,0 +1,91 @@
+{
+  "uid": "ebpf-telemetry",
+  "title": "eBPF Network Telemetry",
+  "description": "Packet throughput, active flows, anomaly breakdown and ring-buffer health for the eBPF Network Telemetry daemon.",
+  "tags": ["ebpf", "telemetry", "security"],
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": {"from": "now-30m", "to": "now"},
+  "schemaVersion": 39,
+  "version": 1,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Packet Throughput (Passed vs Dropped)",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 0, "w": 24, "h": 8},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum(rate(telemetry_packets_total[1m]))",
+          "legendFormat": "Passed"
+        },
+        {
+          "refId": "B",
+          "expr": "sum(rate(telemetry_packets_dropped_total[1m]))",
+          "legendFormat": "Dropped (SYN-flood)"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Active Connection Flows",
+      "type": "stat",
+      "gridPos": {"x": 0, "y": 8, "w": 8, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "telemetry_active_flows"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Anomaly Breakdown by Type",
+      "type": "timeseries",
+      "gridPos": {"x": 8, "y": 8, "w": 16, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (type) (rate(telemetry_anomalies_detected_total[5m]))",
+          "legendFormat": "{{type}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Ring Buffer Latency & Consumer Health",
+      "type": "timeseries",
+      "gridPos": {"x": 0, "y": 14, "w": 16, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "rate(telemetry_ring_consumed_total[1m])",
+          "legendFormat": "Consumed/s"
+        },
+        {
+          "refId": "B",
+          "expr": "rate(telemetry_ring_errors_total[1m])",
+          "legendFormat": "Errors/s"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Tracepoint Correlation Events",
+      "type": "stat",
+      "gridPos": {"x": 16, "y": 14, "w": 8, "h": 6},
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "telemetry_conn_events_total"
+        }
+      ]
+    }
+  ]
+}

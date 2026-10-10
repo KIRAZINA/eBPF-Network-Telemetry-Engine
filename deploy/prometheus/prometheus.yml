@@ -1,0 +1,27 @@
+# prometheus.yml — scrape config for the eBPF telemetry stack.
+#
+# The daemon exposes Prometheus exposition at :9090/metrics (see
+# src/daemon/metrics_exporter.cpp). From containers, the host is reached via
+# host.docker.internal (built-in on Docker Desktop; mapped to the host
+# gateway via extra_hosts on Linux — see docker-compose.yml).
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 5s
+
+rule_files:
+  - alert_rules.yml
+
+scrape_configs:
+  - job_name: ebpf-telemetry
+    scrape_interval: 5s
+    scrape_timeout: 4s
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['host.docker.internal:9090']
+        labels:
+          instance: ebpf-daemon
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']

@@ -1,0 +1,46 @@
+# alert_rules.yml — production alerts for the eBPF telemetry stack.
+#
+# Metric names match src/daemon/metrics_exporter.cpp exactly:
+#   telemetry_anomalies_detected_total{type="syn_flood"|"port_scan"|"suspicious_process"}
+#   telemetry_ring_errors_total, up{job="ebpf-telemetry"}
+# Thresholds are starting points — tune from the Grafana dashboards (p99 + margin).
+
+groups:
+  - name: ebpf-telemetry
+    interval: 5s
+    rules:
+      - alert: SynFloodSpike
+        expr: sum(rate(telemetry_anomalies_detected_total{type="syn_flood"}[1m])) > 5
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "SYN-flood anomaly spike"
+          description: "syn_flood detector verdicts above 5/s over the last minute."
+
+      - alert: PortScanDetected
+        expr: sum(rate(telemetry_anomalies_detected_total{type="port_scan"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Port-scan anomaly detected"
+          description: "port_scan detector verdicts observed over the last 5 minutes."
+
+      - alert: RingBufferErrors
+        expr: sum(rate(telemetry_ring_errors_total[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Ring-buffer errors accumulating"
+          description: "Ring poll errors observed over the last 5 minutes; consumer may be losing events."
+
+      - alert: DaemonDown
+        expr: up{job="ebpf-telemetry"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "eBPF telemetry daemon unscrapeable"
+          description: "No successful Prometheus scrape of the daemon for 1 minute."

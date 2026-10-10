@@ -1,0 +1,30 @@
+# .clang-tidy — static analysis policy for src/daemon (enforced in CI).
+#
+# Gate: clang-tidy <file> -p build --warnings-as-errors='*'
+# (see .github/workflows/ci.yml, clang-tidy job).
+#
+# Deliberately scoped: bugprone / concurrency / misc / performance plus two
+# safe modernizations. Readability and style checks are excluded — formatting
+# is not part of the merge gate. FlowKey/FlowStats stay plain aggregates, so
+# misc-non-private-member-variables-in-classes is disabled.
+
+Checks: >
+  bugprone-*,
+  concurrency-*,
+  misc-*,
+  -misc-non-private-member-variables-in-classes,
+  modernize-use-nullptr,
+  modernize-use-override,
+  performance-*,
+  cppcoreguidelines-avoid-goto
+
+WarningsAsErrors: '*'
+HeaderFilterRegex: 'src/daemon/.*'
+FormatStyle: file
+CheckOptions:
+  - key: bugprone-sizeof-expression.WarnOnSizeOfConstant
+    value: true
+  - key: concurrency-mt-unsafe.FunctionSet
+    value: 'posix'
+  - key: performance-move-const-arg.CheckTriviallyCopyableMove
+    value: true
