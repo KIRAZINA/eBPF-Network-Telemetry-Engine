@@ -65,11 +65,19 @@ endforeach()
 unset(_incdir)
 
 # CO-RE: prefer real vmlinux.h, else stub fallback inside telemetry.bpf.c.
-if(EXISTS "${PROJECT_SOURCE_DIR}/include/vmlinux.h")
+# NOTE (fresh-build ordering): the header may not exist at configure time yet
+# be generated before compilation (TARGET generate-vmlinux-header, defined in
+# the root CMakeLists when bpftool + host BTF are present). In that case the
+# HAVE path is still correct — the file-level DEPENDS below orders generation
+# strictly before each .bpf.o compile. Only when generation is unavailable AND
+# no header exists do we take the stub path (vmlinux_compat.h is self-sufficient).
+if(EXISTS "${PROJECT_SOURCE_DIR}/include/vmlinux.h" OR TARGET generate-vmlinux-header)
     set(BPF_VMLINUX_DEFINE "-DHAVE_VMLINUX_H=1")
+    set(BPF_VMLINUX_DEPENDS "${PROJECT_SOURCE_DIR}/include/vmlinux.h")
 else()
     set(BPF_VMLINUX_DEFINE "-DTELEMETRY_NO_VMLINUX_H=1")
-    message(STATUS "src/kernel: include/vmlinux.h absent; BPF objects use stub types. "
+    set(BPF_VMLINUX_DEPENDS "")
+    message(STATUS "src/kernel: include/vmlinux.h absent and not generatable; BPF objects use stub types. "
                    "Generate with: bpftool btf dump file /sys/kernel/btf/vmlinux format c > include/vmlinux.h")
 endif()
 
@@ -97,6 +105,7 @@ foreach(bpf_src IN LISTS BPF_SOURCES)
         DEPENDS "${bpf_src}"
                 "${PROJECT_SOURCE_DIR}/include/event_types.h"
                 "${CMAKE_CURRENT_SOURCE_DIR}/vmlinux_compat.h"
+                ${BPF_VMLINUX_DEPENDS}
         COMMENT "Compiling BPF ${bpf_name}.c -> ${bpf_stem}.bpf.o"
         VERBATIM
     )

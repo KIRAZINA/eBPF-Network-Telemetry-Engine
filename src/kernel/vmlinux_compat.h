@@ -18,23 +18,31 @@
 #error "vmlinux_compat.h must not be included when HAVE_VMLINUX_H is set; include <vmlinux.h> instead"
 #endif
 
-typedef unsigned long long __u64;
-typedef unsigned int __u32;
-typedef unsigned short __u16;
-typedef unsigned char __u8;
+/* Kernel integer types: pull the full UAPI set (__u64/__u32/... plus the
+ * SIGNED __s64/__s32 family) from <linux/types.h>, which resolves via
+ * -I/usr/include even under -nostdinc (see src/kernel/CMakeLists.txt).
+ * Hand-rolled typedefs are deliberately NOT used here: bpf_helper_defs.h
+ * needs __s64/__s32/__wsum, and partial stubs break its prototypes. */
+#include <linux/types.h>
+
+/* Checksum word type (linux/checksum.h), needed by bpf_helper_defs.h
+ * prototypes such as bpf_csum_diff / bpf_csum_update. Matches the kernel:
+ * typedef __u32 __wsum. */
+typedef __u32 __wsum;
+
 typedef __u16 __be16;
 typedef __u32 __be32;
 
+/* BPF map/program-type enum constants (BPF_MAP_TYPE_RINGBUF,
+ * BPF_MAP_TYPE_LRU_HASH, struct __sk_buff, ...). Resolves via -I/usr/include
+ * even under -nostdinc. Must come AFTER <linux/types.h> above. Brings no
+ * conflicting struct definitions (no ethhdr/iphdr/tcphdr/xdp_md here). */
+#include <linux/bpf.h>
+
 #define TELEMETRY_COMPAT_TYPES_DEFINED 1
 
-struct xdp_md {
-    __u32 data;
-    __u32 data_end;
-    __u32 data_meta;
-    __u32 ingress_ifindex;
-    __u32 rx_queue_index;
-    __u32 egress_ifindex;
-};
+/* NOTE: struct xdp_md is intentionally NOT defined here — it already comes
+ * from <linux/bpf.h> below. Defining it twice is a hard error. */
 
 struct ethhdr {
     unsigned char h_dest[6];
