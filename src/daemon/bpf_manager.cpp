@@ -3,13 +3,12 @@
 #include "bpf_manager.hpp"
 
 #include <cstdio>
-#include <system_error>
+#include <filesystem>
+#include <string>
 #include <utility>
 
 #ifdef HAVE_LIBBPF
 #include <cerrno>
-#include <cstring>
-#include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 
 namespace telemetry {
@@ -90,7 +89,7 @@ bool BpfManager::open()
     if (raw == nullptr) {
         const int ec = errno;
         last_error_ = "bpf_object__open_file(" + object_path_.string() +
-                      "): " + std::strerror(ec);
+                      "): " + std::generic_category().message(ec);
         return false;
     }
     object_.reset(raw);
@@ -110,7 +109,7 @@ bool BpfManager::load()
     if (::bpf_object__load(object_.get()) != 0) {
         const int ec = errno;
         last_error_ =
-            "bpf_object__load: " + std::string(std::strerror(ec));
+            "bpf_object__load: " + std::generic_category().message(ec);
         return false;
     }
     loaded_ = true;
@@ -133,7 +132,7 @@ struct bpf_link* attach_generic(struct bpf_object* obj, const char* prog_name,
     if (::libbpf_get_error(link) != 0) {
         const int ec = errno;
         err += std::string("attach(") + prog_name + "): " +
-               std::strerror(ec) + "; ";
+               std::generic_category().message(ec) + "; ";
         return nullptr;
     }
     return link;
@@ -193,7 +192,7 @@ bool BpfManager::attach_xdp(int ifindex)
     if (::libbpf_get_error(link) != 0) {
         const int ec = errno;
         last_error_ += "attach_xdp(ifindex=" + std::to_string(ifindex) +
-                       "): " + std::strerror(ec) + "; ";
+                       "): " + std::generic_category().message(ec) + "; ";
         return false;
     }
     ifindex_ = ifindex;
@@ -225,6 +224,8 @@ void BpfManager::detach() noexcept
 } // namespace telemetry
 
 #else /* !HAVE_LIBBPF — portable stub: same API, no kernel touch */
+
+#include <system_error>
 
 namespace telemetry {
 

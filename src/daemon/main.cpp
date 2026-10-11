@@ -14,6 +14,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <stop_token>
 #include <string>
@@ -23,6 +24,7 @@
 #include "anomaly_detector.hpp"
 #include "connection_tracker.hpp"
 #include "event_queue.hpp"
+#include "event_types.h"
 #include "metrics_exporter.hpp"
 #include "ring_buffer_consumer.hpp"
 
@@ -63,6 +65,8 @@ int main(int argc, char** argv)
                 metrics_port = static_cast<std::uint16_t>(v);
             }
         } catch (...) {
+            // Keep the default port; a malformed argv[3] is not fatal.
+            metrics_port = telemetry::MetricsExporter::kDefaultPort;
         }
     }
 

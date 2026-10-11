@@ -50,7 +50,7 @@ public:
 
     bool try_pop(telemetry_event& out)
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        const std::lock_guard<std::mutex> lock(mutex_);
         if (queue_.empty()) {
             return false;
         }
@@ -77,7 +77,7 @@ public:
     void shutdown() noexcept
     {
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            const std::lock_guard<std::mutex> lock(mutex_);
             closed_ = true;
         }
         cv_.notify_all();
@@ -85,26 +85,26 @@ public:
 
     void reset()
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        const std::lock_guard<std::mutex> lock(mutex_);
         closed_ = false;
         queue_.clear();
     }
 
     [[nodiscard]] std::size_t size() const
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        const std::lock_guard<std::mutex> lock(mutex_);
         return queue_.size();
     }
 
     [[nodiscard]] bool empty() const
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        const std::lock_guard<std::mutex> lock(mutex_);
         return queue_.empty();
     }
 
     [[nodiscard]] bool closed() const noexcept
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        const std::lock_guard<std::mutex> lock(mutex_);
         return closed_;
     }
 

@@ -2,8 +2,18 @@
 
 #include "anomaly_detector.hpp"
 
+#include <atomic>
+#include <cstdint>
 #include <cstdio>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
 #include <utility>
+
+#include "connection_tracker.hpp"
+#include "event_types.h"
+#include "sliding_window.hpp"
 
 namespace telemetry {
 
@@ -16,7 +26,7 @@ AnomalyDetector::AnomalyDetector(ConnectionTracker& tracker,
 
 void AnomalyDetector::set_sink(AlertSink sink)
 {
-    std::lock_guard<std::mutex> lock(sink_mutex_);
+    const std::lock_guard<std::mutex> lock(sink_mutex_);
     sink_ = std::move(sink);
 }
 
@@ -25,7 +35,7 @@ double AnomalyDetector::observe_syn(std::uint32_t src_ip,
 {
     WindowShard& shard =
         syn_windows_[src_ip % kWindowShards]; // NOLINT: power-of-two mod
-    std::lock_guard<std::mutex> lock(shard.mutex);
+    const std::lock_guard<std::mutex> lock(shard.mutex);
     auto it = shard.windows.find(src_ip);
     if (it == shard.windows.end()) {
         auto counter = std::make_unique<SlidingWindowCounter>();
@@ -60,7 +70,7 @@ std::optional<Verdict> AnomalyDetector::evaluate(const telemetry_event& evt)
             syn_alerts_.fetch_add(std::uint64_t{1}, std::memory_order_relaxed);
             AlertSink sink;
             {
-                std::lock_guard<std::mutex> lock(sink_mutex_);
+                const std::lock_guard<std::mutex> lock(sink_mutex_);
                 sink = sink_;
             }
             if (sink != nullptr) {
@@ -88,7 +98,7 @@ std::optional<Verdict> AnomalyDetector::evaluate(const telemetry_event& evt)
             scan_alerts_.fetch_add(std::uint64_t{1}, std::memory_order_relaxed);
             AlertSink sink;
             {
-                std::lock_guard<std::mutex> lock(sink_mutex_);
+                const std::lock_guard<std::mutex> lock(sink_mutex_);
                 sink = sink_;
             }
             if (sink != nullptr) {
@@ -117,7 +127,7 @@ std::optional<Verdict> AnomalyDetector::evaluate(const telemetry_event& evt)
                                       std::memory_order_relaxed);
             AlertSink sink;
             {
-                std::lock_guard<std::mutex> lock(sink_mutex_);
+                const std::lock_guard<std::mutex> lock(sink_mutex_);
                 sink = sink_;
             }
             if (sink != nullptr) {

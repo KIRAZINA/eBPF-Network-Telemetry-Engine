@@ -136,8 +136,30 @@ jobs:
       - name: Install bpftool + LLVM tools
         run: |
           sudo apt-get update
+          # linux-tools-azure tracks the GH-hosted runner kernel
+          # (e.g. 6.17.0-1022-azure); without it the /usr/sbin/bpftool
+          # wrapper refuses to run and prog load is impossible.
           sudo apt-get install -y --no-install-recommends \
-            llvm linux-tools-common linux-tools-generic
+            llvm linux-tools-common linux-tools-generic linux-tools-azure
+      - name: Resolve a working bpftool (wrapper or versioned binary)
+        run: |
+          # The /usr/sbin/bpftool wrapper refuses to run when the running
+          # kernel (e.g. 6.17.0-1022-azure) has no matching linux-tools
+          # package in noble (which ships 6.8). A versioned binary invoked
+          # directly bypasses the wrapper check and can still drive the
+          # verifier, so try every candidate instead of just the wrapper.
+          for cand in "$(command -v bpftool)" /usr/lib/linux-tools/*/bpftool; do
+            [ -n "$cand" ] || continue
+            echo "trying: $cand"
+            if sudo "$cand" version >/dev/null 2>&1; then
+              BPFTOOL="$cand"
+              break
+            fi
+          done
+          if [ -z "${BPFTOOL:-}" ] || ! sudo "$BPFTOOL" version; then
+            echo "no working bpftool; installed candidates:"; ls -l /usr/lib/linux-tools/*/bpftool 2>/dev/null; echo "---"; command -v bpftool; exit 1
+          fi
+          echo "BPFTOOL=$BPFTOOL" >> "$GITHUB_ENV"
       - name: Locate downloaded artifacts (layout-agnostic)
         run: |
           BPF_OBJ=$(find dist -name telemetry.bpf.o -print -quit)
@@ -156,8 +178,8 @@ jobs:
         run: |
           uname -r
           ls -l /sys/kernel/btf/vmlinux
-          sudo bpftool prog load "$BPF_OBJ" /sys/fs/bpf/ci_verify autoattach
-          sudo bpftool prog show pinned /sys/fs/bpf/ci_verify
+          sudo "$BPFTOOL" prog load "$BPF_OBJ" /sys/fs/bpf/ci_verify autoattach
+          sudo "$BPFTOOL" prog show pinned /sys/fs/bpf/ci_verify
           sudo rm /sys/fs/bpf/ci_verify
           echo "VERIFIER GATE PASSED"
 

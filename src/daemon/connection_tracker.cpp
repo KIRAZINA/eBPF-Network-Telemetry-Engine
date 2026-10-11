@@ -2,8 +2,13 @@
 
 #include "connection_tracker.hpp"
 
-#include <limits>
+#include <cstddef>
+#include <cstdint>
+#include <mutex>
+#include <optional>
 #include <set>
+
+#include "event_types.h"
 
 namespace telemetry {
 
@@ -51,9 +56,9 @@ const ConnectionTracker::Shard& ConnectionTracker::shard_for(
 void ConnectionTracker::observe(const telemetry_event& evt,
                                 std::uint64_t byte_len)
 {
-    FlowKey k = key_of(evt); // single source of key normalization
+    const FlowKey k = key_of(evt); // single source of key normalization
     Shard& s = shard_for(k);
-    std::lock_guard<std::mutex> lock(s.mutex);
+    const std::lock_guard<std::mutex> lock(s.mutex);
 
     auto it = s.map.find(k);
     if (it != s.map.end()) {
@@ -99,7 +104,7 @@ void ConnectionTracker::observe(const telemetry_event& evt,
 std::optional<FlowStats> ConnectionTracker::lookup(const FlowKey& key) const
 {
     const Shard& s = shard_for(key);
-    std::lock_guard<std::mutex> lock(s.mutex);
+    const std::lock_guard<std::mutex> lock(s.mutex);
     const auto it = s.map.find(key);
     if (it == s.map.end()) {
         return std::nullopt;
@@ -111,7 +116,7 @@ std::size_t ConnectionTracker::size() const
 {
     std::size_t total = 0;
     for (const auto& s : shards_) {
-        std::lock_guard<std::mutex> lock(s.mutex);
+        const std::lock_guard<std::mutex> lock(s.mutex);
         total += s.map.size();
     }
     return total;
@@ -122,7 +127,7 @@ std::size_t ConnectionTracker::evict_older_than(
 {
     std::size_t evicted = 0;
     for (auto& s : shards_) {
-        std::lock_guard<std::mutex> lock(s.mutex);
+        const std::lock_guard<std::mutex> lock(s.mutex);
         for (auto it = s.map.begin(); it != s.map.end();) {
             const std::uint64_t last = it->second.last_seen_ns;
             const bool stale =
@@ -143,7 +148,7 @@ std::size_t ConnectionTracker::count_distinct_ports_from(
 {
     std::set<std::uint16_t> ports; // small fan-out set; early-exits at cap
     for (const auto& s : shards_) {
-        std::lock_guard<std::mutex> lock(s.mutex);
+        const std::lock_guard<std::mutex> lock(s.mutex);
         for (const auto& [k, st] : s.map) {
             (void)st;
             if (k.saddr == src_ip) {
@@ -161,7 +166,7 @@ std::size_t ConnectionTracker::count_flows_from(std::uint32_t src_ip) const
 {
     std::size_t n = 0;
     for (const auto& s : shards_) {
-        std::lock_guard<std::mutex> lock(s.mutex);
+        const std::lock_guard<std::mutex> lock(s.mutex);
         for (const auto& [k, st] : s.map) {
             (void)st;
             if (k.saddr == src_ip) {
@@ -175,7 +180,7 @@ std::size_t ConnectionTracker::count_flows_from(std::uint32_t src_ip) const
 void ConnectionTracker::clear()
 {
     for (auto& s : shards_) {
-        std::lock_guard<std::mutex> lock(s.mutex);
+        const std::lock_guard<std::mutex> lock(s.mutex);
         s.map.clear();
     }
 }

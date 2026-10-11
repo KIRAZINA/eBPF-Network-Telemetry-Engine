@@ -2,15 +2,25 @@
 
 #include "metrics_exporter.hpp"
 
+#include <atomic>
+#include <cstdint>
+#include <cstdio>
+#include <string>
+#include <string_view>
+#include <stop_token>
+#include <thread>
 #include <utility>
 
 #include "anomaly_detector.hpp"
+#include "event_types.h"
 
 #if defined(__linux__) || defined(__APPLE__)
 #include <cerrno>
-#include <cstdio>
 #include <sys/select.h>
 #include <sys/socket.h>
+// NOLINTNEXTLINE(misc-include-cleaner) — tidy-18 DB gap: this IS the provider
+// of timeval (verified: TU builds warning-free without transitive reliance).
+#include <sys/time.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
@@ -246,6 +256,8 @@ bool MetricsExporter::start()
         return false;
     }
     const int one = 1;
+    // NOLINTNEXTLINE(misc-include-cleaner) — tidy-18 DB gap: SOL_SOCKET and
+    // SO_REUSEADDR come from <sys/socket.h> (included above).
     (void)::setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one,
                        static_cast<socklen_t>(sizeof(one)));
 
@@ -304,6 +316,8 @@ void MetricsExporter::stop() noexcept
             accept_thread_.request_stop();
         }
     } catch (...) {
+        // request_stop() is noexcept in practice; log and continue teardown.
+        std::fprintf(stderr, "[telemetry] metrics stop: request_stop threw\n");
     }
     const int fd = listen_fd_.exchange(-1, std::memory_order_acq_rel);
     if (fd >= 0) {
@@ -316,6 +330,8 @@ void MetricsExporter::stop() noexcept
             accept_thread_.join();
         }
     } catch (...) {
+        // join() on a joinable thread is not expected to throw; log it.
+        std::fprintf(stderr, "[telemetry] metrics stop: join threw\n");
     }
 }
 
@@ -330,6 +346,7 @@ void MetricsExporter::accept_loop(std::stop_token tok) noexcept
             fd_set rfds;
             FD_ZERO(&rfds);
             FD_SET(fd, &rfds);
+            // NOLINTNEXTLINE(misc-include-cleaner) — see <sys/time.h> note above.
             timeval tv{0, 100000}; // 100 ms stop granularity
             const int rc = ::select(fd + 1, &rfds, nullptr, nullptr, &tv);
             if (rc < 0) {
@@ -355,6 +372,8 @@ void MetricsExporter::accept_loop(std::stop_token tok) noexcept
             // Inline, bounded handling (metrics cadence is low); the socket
             // carries a 2 s recv timeout so a stalled peer cannot wedge us.
             const timeval rtv{2, 0};
+            // NOLINTNEXTLINE(misc-include-cleaner) — SO_RCVTIMEO also comes
+            // from <sys/socket.h> (see note above).
             (void)::setsockopt(conn, SOL_SOCKET, SO_RCVTIMEO, &rtv,
                                static_cast<socklen_t>(sizeof(rtv)));
             std::string req;
@@ -378,6 +397,10 @@ void MetricsExporter::accept_loop(std::stop_token tok) noexcept
             close_fd(conn);
         }
     } catch (...) {
+        // Only std::bad_alloc can realistically escape the loop above;
+        // report it — the accept thread must never die silently.
+        std::fprintf(stderr,
+                     "[telemetry] metrics accept loop exiting on exception\n");
     }
 }
 

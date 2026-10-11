@@ -2,12 +2,18 @@
 
 #include "ring_buffer_consumer.hpp"
 
+#include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <stop_token>
 #include <thread>
 #include <utility>
 
+#include "event_types.h"
+
 #ifdef HAVE_LIBBPF
-#include <bpf/bpf.h>
 #include <bpf/libbpf.h>
 #endif
 
